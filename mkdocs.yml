@@ -61,6 +61,7 @@ nav:
       - Event Loop: concepts/event-loop.md
   - Deployment:
       - Deployment: deployment/index.md
+      - Preflight: deployment/preflight.md
       - Docker: deployment/docker.md
   - Release Notes: release-notes.md
   - Contributing: contributing.md

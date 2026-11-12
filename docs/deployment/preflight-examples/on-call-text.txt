@@ -1,0 +1,29 @@
+Uvicorn preflight verdict: BLOCK (exit 2)
+
+Listener: {"endpoint": {"kind": "tcp", "host": "0.0.0.0", "port": 8000}, "sources": {"host": "commandline", "port": "default", "uds": "default", "fd": "default"}}
+Proxy trust: {"proxy_headers": true, "forwarded_allow_ips": {"value": "10.0.0.0/12,999.1.1.1", "source": "commandline", "detail": null, "parsed": {"always_trust": false, "addresses": [], "networks": ["10.0.0.0/12"], "literals": ["999.1.1.1"], "malformed": ["999.1.1.1"]}}}
+TLS: {"enabled": false, "certfile": {"value": null, "source": "default", "detail": null, "configured": false}, "keyfile": {"source": "default", "detail": null, "configured": false, "value": null}, "keyfile_password": {"source": "default", "detail": null, "configured": false, "value": null}, "version": {"value": 17, "source": "default", "detail": null, "configured": true}, "cert_reqs": {"value": 0, "source": "default", "detail": null, "configured": true}, "ca_certs": {"value": null, "source": "default", "detail": null, "configured": false}, "ciphers": {"value": null, "source": "default", "detail": null, "configured": false}, "protocol": "plaintext"}
+
+Effective configuration:
+  - app: 'api.svc:app' [commandline]
+  - host: '0.0.0.0' [commandline]
+  - port: 8000 [default]
+  - uds: None [default]
+  - fd: None [default]
+  - proxy_headers: True [default]
+  - workers: 1 [default]
+  - ssl_version: 17 [default]
+  - ssl_cert_reqs: 0 [default]
+  - ssl_certfile: None [default]
+  - ssl_ca_certs: None [default]
+  - ssl_ciphers: None [default]
+  - forwarded_allow_ips: '10.0.0.0/12,999.1.1.1' [commandline]
+  - ssl_keyfile: None [default]
+  - ssl_keyfile_password: None [default]
+
+Findings:
+  - [WARNING] LISTEN_ALL_INTERFACES: The listener binds every interface and accepts connections from the network, not just the local machine.
+  - [ERROR  ] PROXY_TRUST_OVERLY_BROAD_NETWORK: Trusted proxy network 10.0.0.0/12 spans more than a /24; narrow it to the proxy addresses you actually operate.
+  - [WARNING] PROXY_TRUST_MALFORMED_ENTRY: Entries are not valid IP addresses or networks, so Uvicorn falls back to literal string matching that can never match an IP peer.
+
+Redacted fields: none

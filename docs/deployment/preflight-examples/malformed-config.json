@@ -1,0 +1,202 @@
+{
+  "schema_version": "1",
+  "generated_at": "2026-11-12T07:59:47.530175+00:00",
+  "verdict": "block",
+  "summary": {
+    "errors": 3,
+    "warnings": 1,
+    "infos": 0,
+    "parse_errors": 1,
+    "redacted": 0
+  },
+  "listener": {
+    "endpoint": {
+      "kind": "tcp",
+      "host": "127.0.0.1",
+      "port": null
+    },
+    "sources": {
+      "host": "default",
+      "port": "environment",
+      "uds": "default",
+      "fd": "default"
+    }
+  },
+  "proxy_trust": {
+    "proxy_headers": true,
+    "forwarded_allow_ips": {
+      "value": "10.0.0.0/8, 256.1.1.1, , proxy.internal",
+      "source": "environment",
+      "detail": "FORWARDED_ALLOW_IPS",
+      "parsed": {
+        "always_trust": false,
+        "addresses": [],
+        "networks": [
+          "10.0.0.0/8"
+        ],
+        "literals": [
+          "256.1.1.1",
+          "proxy.internal"
+        ],
+        "malformed": [
+          "256.1.1.1",
+          "proxy.internal"
+        ]
+      }
+    }
+  },
+  "tls": {
+    "enabled": true,
+    "certfile": {
+      "value": "/etc/uvicorn/missing/cert.pem",
+      "source": "commandline",
+      "detail": null,
+      "configured": true
+    },
+    "keyfile": {
+      "source": "default",
+      "detail": null,
+      "configured": false,
+      "value": null
+    },
+    "keyfile_password": {
+      "source": "default",
+      "detail": null,
+      "configured": false,
+      "value": null
+    },
+    "version": {
+      "value": 17,
+      "source": "default",
+      "detail": null,
+      "configured": true
+    },
+    "cert_reqs": {
+      "value": 0,
+      "source": "default",
+      "detail": null,
+      "configured": true
+    },
+    "ca_certs": {
+      "value": null,
+      "source": "default",
+      "detail": null,
+      "configured": false
+    },
+    "ciphers": {
+      "value": null,
+      "source": "default",
+      "detail": null,
+      "configured": false
+    },
+    "protocol": "tls"
+  },
+  "effective": {
+    "app": {
+      "value": "edge.gateway:app",
+      "source": "commandline"
+    },
+    "host": {
+      "value": "127.0.0.1",
+      "source": "default"
+    },
+    "port": {
+      "value": null,
+      "source": "environment",
+      "detail": "UVICORN_PORT"
+    },
+    "uds": {
+      "value": null,
+      "source": "default"
+    },
+    "fd": {
+      "value": null,
+      "source": "default"
+    },
+    "proxy_headers": {
+      "value": true,
+      "source": "default"
+    },
+    "workers": {
+      "value": 1,
+      "source": "default",
+      "detail": "workers"
+    },
+    "ssl_version": {
+      "value": 17,
+      "source": "default"
+    },
+    "ssl_cert_reqs": {
+      "value": 0,
+      "source": "default"
+    },
+    "ssl_certfile": {
+      "value": "/etc/uvicorn/missing/cert.pem",
+      "source": "commandline"
+    },
+    "ssl_ca_certs": {
+      "value": null,
+      "source": "default"
+    },
+    "ssl_ciphers": {
+      "value": null,
+      "source": "default"
+    },
+    "forwarded_allow_ips": {
+      "value": "10.0.0.0/8, 256.1.1.1, , proxy.internal",
+      "source": "environment",
+      "detail": "FORWARDED_ALLOW_IPS"
+    },
+    "ssl_keyfile": {
+      "value": null,
+      "source": "default"
+    },
+    "ssl_keyfile_password": {
+      "value": null,
+      "source": "default"
+    }
+  },
+  "findings": [
+    {
+      "severity": "error",
+      "code": "PORT_OUT_OF_RANGE",
+      "message": "Port must be an integer between 0 and 65535.",
+      "setting": "port",
+      "value": null
+    },
+    {
+      "severity": "error",
+      "code": "PROXY_TRUST_OVERLY_BROAD_NETWORK",
+      "message": "Trusted proxy network 10.0.0.0/8 spans more than a /24; narrow it to the proxy addresses you actually operate.",
+      "setting": "forwarded_allow_ips",
+      "value": "10.0.0.0/8"
+    },
+    {
+      "severity": "warning",
+      "code": "PROXY_TRUST_MALFORMED_ENTRY",
+      "message": "Entries are not valid IP addresses or networks, so Uvicorn falls back to literal string matching that can never match an IP peer.",
+      "setting": "forwarded_allow_ips",
+      "value": [
+        "256.1.1.1",
+        "proxy.internal"
+      ]
+    },
+    {
+      "severity": "error",
+      "code": "TLS_FILE_MISSING",
+      "message": "Configured file does not exist.",
+      "setting": "ssl_certfile",
+      "value": "/etc/uvicorn/missing/cert.pem"
+    }
+  ],
+  "redaction": {
+    "policy": "TLS private key paths and key credentials are never emitted",
+    "redacted_fields": []
+  },
+  "parsing": {
+    "env_file": null,
+    "errors": [
+      "Invalid value for '--port': 'not-a-port' is not a valid integer."
+    ]
+  }
+}

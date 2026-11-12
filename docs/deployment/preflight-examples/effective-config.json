@@ -1,0 +1,163 @@
+{
+  "schema_version": "1",
+  "generated_at": "2026-11-12T07:59:47.385007+00:00",
+  "verdict": "proceed",
+  "summary": {
+    "errors": 0,
+    "warnings": 0,
+    "infos": 0,
+    "parse_errors": 0,
+    "redacted": 0
+  },
+  "listener": {
+    "endpoint": {
+      "kind": "tcp",
+      "host": "127.0.0.1",
+      "port": 8443
+    },
+    "sources": {
+      "host": "commandline",
+      "port": "commandline",
+      "uds": "default",
+      "fd": "default"
+    }
+  },
+  "proxy_trust": {
+    "proxy_headers": true,
+    "forwarded_allow_ips": {
+      "value": "10.0.1.5,10.0.1.6,fd00::1",
+      "source": "environment",
+      "detail": "FORWARDED_ALLOW_IPS",
+      "parsed": {
+        "always_trust": false,
+        "addresses": [
+          "10.0.1.5",
+          "10.0.1.6",
+          "fd00::1"
+        ],
+        "networks": [],
+        "literals": [],
+        "malformed": []
+      }
+    }
+  },
+  "tls": {
+    "enabled": false,
+    "certfile": {
+      "value": null,
+      "source": "default",
+      "detail": null,
+      "configured": false
+    },
+    "keyfile": {
+      "source": "default",
+      "detail": null,
+      "configured": false,
+      "value": null
+    },
+    "keyfile_password": {
+      "source": "default",
+      "detail": null,
+      "configured": false,
+      "value": null
+    },
+    "version": {
+      "value": 17,
+      "source": "default",
+      "detail": null,
+      "configured": true
+    },
+    "cert_reqs": {
+      "value": 0,
+      "source": "default",
+      "detail": null,
+      "configured": true
+    },
+    "ca_certs": {
+      "value": null,
+      "source": "default",
+      "detail": null,
+      "configured": false
+    },
+    "ciphers": {
+      "value": null,
+      "source": "default",
+      "detail": null,
+      "configured": false
+    },
+    "protocol": "plaintext"
+  },
+  "effective": {
+    "app": {
+      "value": "payments.main:app",
+      "source": "commandline"
+    },
+    "host": {
+      "value": "127.0.0.1",
+      "source": "commandline"
+    },
+    "port": {
+      "value": 8443,
+      "source": "commandline"
+    },
+    "uds": {
+      "value": null,
+      "source": "default"
+    },
+    "fd": {
+      "value": null,
+      "source": "default"
+    },
+    "proxy_headers": {
+      "value": true,
+      "source": "commandline"
+    },
+    "workers": {
+      "value": 4,
+      "source": "environment",
+      "detail": "WEB_CONCURRENCY"
+    },
+    "ssl_version": {
+      "value": 17,
+      "source": "default"
+    },
+    "ssl_cert_reqs": {
+      "value": 0,
+      "source": "default"
+    },
+    "ssl_certfile": {
+      "value": null,
+      "source": "default"
+    },
+    "ssl_ca_certs": {
+      "value": null,
+      "source": "default"
+    },
+    "ssl_ciphers": {
+      "value": null,
+      "source": "default"
+    },
+    "forwarded_allow_ips": {
+      "value": "10.0.1.5,10.0.1.6,fd00::1",
+      "source": "environment",
+      "detail": "FORWARDED_ALLOW_IPS"
+    },
+    "ssl_keyfile": {
+      "value": null,
+      "source": "default"
+    },
+    "ssl_keyfile_password": {
+      "value": null,
+      "source": "default"
+    }
+  },
+  "findings": [],
+  "redaction": {
+    "policy": "TLS private key paths and key credentials are never emitted",
+    "redacted_fields": []
+  },
+  "parsing": {
+    "env_file": null,
+    "errors": []
+  }
+}

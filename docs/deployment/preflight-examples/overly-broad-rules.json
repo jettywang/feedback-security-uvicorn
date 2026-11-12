@@ -1,0 +1,201 @@
+{
+  "schema_version": "1",
+  "generated_at": "2026-11-12T07:59:47.458001+00:00",
+  "verdict": "block",
+  "summary": {
+    "errors": 3,
+    "warnings": 1,
+    "infos": 1,
+    "parse_errors": 0,
+    "redacted": 2
+  },
+  "listener": {
+    "endpoint": {
+      "kind": "tcp",
+      "host": "0.0.0.0",
+      "port": 443
+    },
+    "sources": {
+      "host": "environment",
+      "port": "environment",
+      "uds": "default",
+      "fd": "default"
+    }
+  },
+  "proxy_trust": {
+    "proxy_headers": true,
+    "forwarded_allow_ips": {
+      "value": "*",
+      "source": "commandline",
+      "detail": null,
+      "parsed": {
+        "always_trust": true,
+        "addresses": [],
+        "networks": [],
+        "literals": [],
+        "malformed": []
+      }
+    }
+  },
+  "tls": {
+    "enabled": true,
+    "certfile": {
+      "value": "/etc/uvicorn/edge/cert.pem",
+      "source": "environment",
+      "detail": "UVICORN_SSL_CERTFILE",
+      "configured": true
+    },
+    "keyfile": {
+      "source": "environment",
+      "detail": "UVICORN_SSL_KEYFILE",
+      "configured": true,
+      "value": "***REDACTED***"
+    },
+    "keyfile_password": {
+      "source": "environment",
+      "detail": "UVICORN_SSL_KEYFILE_PASSWORD",
+      "configured": true,
+      "value": "***REDACTED***"
+    },
+    "version": {
+      "value": 17,
+      "source": "default",
+      "detail": null,
+      "configured": true
+    },
+    "cert_reqs": {
+      "value": 0,
+      "source": "default",
+      "detail": null,
+      "configured": true
+    },
+    "ca_certs": {
+      "value": null,
+      "source": "default",
+      "detail": null,
+      "configured": false
+    },
+    "ciphers": {
+      "value": "ALL:!aNULL",
+      "source": "commandline",
+      "detail": null,
+      "configured": true
+    },
+    "protocol": "tls"
+  },
+  "effective": {
+    "app": {
+      "value": "edge.gateway:app",
+      "source": "commandline"
+    },
+    "host": {
+      "value": "0.0.0.0",
+      "source": "environment",
+      "detail": "UVICORN_HOST"
+    },
+    "port": {
+      "value": 443,
+      "source": "environment",
+      "detail": "UVICORN_PORT"
+    },
+    "uds": {
+      "value": null,
+      "source": "default"
+    },
+    "fd": {
+      "value": null,
+      "source": "default"
+    },
+    "proxy_headers": {
+      "value": true,
+      "source": "default"
+    },
+    "workers": {
+      "value": 1,
+      "source": "default",
+      "detail": "workers"
+    },
+    "ssl_version": {
+      "value": 17,
+      "source": "default"
+    },
+    "ssl_cert_reqs": {
+      "value": 0,
+      "source": "default"
+    },
+    "ssl_certfile": {
+      "value": "/etc/uvicorn/edge/cert.pem",
+      "source": "environment",
+      "detail": "UVICORN_SSL_CERTFILE"
+    },
+    "ssl_ca_certs": {
+      "value": null,
+      "source": "default"
+    },
+    "ssl_ciphers": {
+      "value": "ALL:!aNULL",
+      "source": "commandline"
+    },
+    "forwarded_allow_ips": {
+      "value": "*",
+      "source": "commandline"
+    },
+    "ssl_keyfile": {
+      "value": "***REDACTED***",
+      "source": "environment",
+      "detail": "UVICORN_SSL_KEYFILE"
+    },
+    "ssl_keyfile_password": {
+      "value": "***REDACTED***",
+      "source": "environment",
+      "detail": "UVICORN_SSL_KEYFILE_PASSWORD"
+    }
+  },
+  "findings": [
+    {
+      "severity": "warning",
+      "code": "LISTEN_ALL_INTERFACES",
+      "message": "The listener binds every interface and accepts connections from the network, not just the local machine.",
+      "setting": "host",
+      "value": "0.0.0.0"
+    },
+    {
+      "severity": "error",
+      "code": "PROXY_TRUST_WILDCARD",
+      "message": "Forwarded headers are trusted from every peer ('*'). Spoofed X-Forwarded-For/X-Forwarded-Proto headers will be accepted.",
+      "setting": "forwarded_allow_ips",
+      "value": "*"
+    },
+    {
+      "severity": "error",
+      "code": "TLS_FILE_MISSING",
+      "message": "Configured file does not exist.",
+      "setting": "ssl_certfile",
+      "value": "/etc/uvicorn/edge/cert.pem"
+    },
+    {
+      "severity": "error",
+      "code": "TLS_FILE_MISSING",
+      "message": "Configured file does not exist.",
+      "setting": "ssl_keyfile",
+      "value": "***REDACTED***"
+    },
+    {
+      "severity": "info",
+      "code": "TLS_ON_WILDCARD_LISTENER",
+      "message": "TLS is enabled on a wildcard listener; verify firewall exposure as well.",
+      "setting": "ssl_certfile"
+    }
+  ],
+  "redaction": {
+    "policy": "TLS private key paths and key credentials are never emitted",
+    "redacted_fields": [
+      "ssl_keyfile",
+      "ssl_keyfile_password"
+    ]
+  },
+  "parsing": {
+    "env_file": null,
+    "errors": []
+  }
+}
