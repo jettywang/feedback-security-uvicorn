@@ -260,6 +260,7 @@ class MockProtocol(asyncio.Protocol):
     tasks: set[asyncio.Task[Any]]
     transport: MockTransport
     timeout_keep_alive_task: asyncio.TimerHandle | None
+    timeout_request_body_task: asyncio.TimerHandle | None
     ws_protocol_class: type[WSProtocol] | None
     scope: Scope
 
@@ -508,6 +509,108 @@ async def test_keepalive_timeout_with_pipelined_websocket_upgrade(
     await protocol.loop.run_one()
 
     assert protocol.timeout_keep_alive_task is None
+
+
+async def test_request_body_timeout_disabled_by_default(http_protocol_cls: type[HTTPProtocol]):
+    app = Response("Hello, world", media_type="text/plain")
+
+    protocol = get_connected_protocol(app, http_protocol_cls)
+    protocol.data_received(START_POST_REQUEST)
+
+    assert protocol.timeout_request_body_task is None
+    protocol.loop.run_later(with_delay=100)
+    assert not protocol.transport.is_closing()
+
+    await protocol.loop.run_one()
+    assert b"HTTP/1.1 200 OK" in protocol.transport.buffer
+    assert protocol.timeout_request_body_task is None
+
+
+async def test_request_body_timeout_closes_stalled_connection(http_protocol_cls: type[HTTPProtocol]):
+    got_disconnect_event = False
+
+    async def app(scope: Scope, receive: ASGIReceiveCallable, send: ASGISendCallable):
+        nonlocal got_disconnect_event
+
+        while True:
+            message = await receive()
+            if message["type"] == "http.disconnect":
+                break
+
+        got_disconnect_event = True
+
+    protocol = get_connected_protocol(app, http_protocol_cls, timeout_request_body=5)
+    protocol.data_received(START_POST_REQUEST)
+    assert protocol.timeout_request_body_task is not None
+    assert not protocol.transport.is_closing()
+
+    # No body data arrives: the idle budget expires and releases the connection.
+    # The disconnect event is delivered before the ASGI task is driven, matching
+    # the scheduling assumptions of the mock event loop.
+    protocol.loop.run_later(with_delay=5)
+    assert protocol.transport.is_closing()
+    assert protocol.timeout_request_body_task is None
+
+    await protocol.loop.run_one()
+    assert got_disconnect_event
+
+
+async def test_request_body_timeout_resets_while_body_progresses(http_protocol_cls: type[HTTPProtocol]):
+    received = b""
+    request_complete = False
+
+    async def app(scope: Scope, receive: ASGIReceiveCallable, send: ASGISendCallable):
+        nonlocal request_complete, received
+
+        while True:
+            message = await receive()
+            if message["type"] == "http.disconnect":
+                break
+            received += message.get("body", b"")
+            if not message.get("more_body", False):
+                request_complete = True
+                break
+
+        response = Response("Hello, world", media_type="text/plain")
+        await response(scope, receive, send)
+
+    protocol = get_connected_protocol(app, http_protocol_cls, timeout_request_body=5)
+    protocol.data_received(START_POST_REQUEST)
+    assert protocol.timeout_request_body_task is not None
+
+    # Slow but steady uploads reset the idle budget on every chunk.
+    for _ in range(4):
+        protocol.loop.run_later(with_delay=4)
+        assert not protocol.transport.is_closing()
+        protocol.data_received(b"x")
+
+    # The final chunk completes the request and removes the timer before
+    # the ASGI task is driven.
+    protocol.data_received(b"x" * 14)
+    assert protocol.timeout_request_body_task is None
+
+    await protocol.loop.run_one()
+    assert request_complete
+    assert received == b"x" * 18
+    assert b"HTTP/1.1 200 OK" in protocol.transport.buffer
+    assert not protocol.transport.is_closing()
+
+
+async def test_request_body_timeout_does_not_fire_after_response(http_protocol_cls: type[HTTPProtocol]):
+    app = Response("Hello, world", media_type="text/plain")
+
+    protocol = get_connected_protocol(app, http_protocol_cls, timeout_request_body=5, timeout_keep_alive=30)
+    # The application responds without consuming the request body.
+    protocol.data_received(START_POST_REQUEST)
+    await protocol.loop.run_one()
+    assert b"HTTP/1.1 200 OK" in protocol.transport.buffer
+    assert protocol.timeout_request_body_task is None
+
+    # Advancing past the former request body budget must not close the
+    # keep-alive connection, which is governed by its own timer.
+    protocol.loop.run_later(with_delay=10)
+    assert not protocol.transport.is_closing()
+    assert protocol.timeout_keep_alive_task is not None
 
 
 async def test_websocket_upgrade_failure_cleans_up_connection(http_protocol_cls: type[HTTPProtocol]):

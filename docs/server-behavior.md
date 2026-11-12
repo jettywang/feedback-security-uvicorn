@@ -63,6 +63,7 @@ One exception to this might be if your application serves large file downloads, 
 Uvicorn provides the following timeouts:
 
 * Keep-Alive. Defaults to 5 seconds. Between requests, connections must receive new data within this period or be disconnected.
+* Request body (`--timeout-request-body`). Defaults to disabled (`None`). When enabled, a request whose body stops making progress is disconnected after the configured number of seconds. The budget is per request and independent of the Keep-Alive timeout: it starts when the request headers arrive, resets every time body data is received, and is removed as soon as the body is complete or the application starts responding. A slow but steadily progressing upload therefore never trips it, and an idle Keep-Alive connection that is not mid-request is governed solely by the Keep-Alive timeout. When it fires, the application receives an `http.disconnect` event and the connection is closed, freeing its capacity.
 
 ---
 

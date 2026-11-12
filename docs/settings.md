@@ -151,4 +151,5 @@ For advanced TLS scenarios that the flags above don't cover (e.g., mutual TLS, c
 ## Timeouts
 
 * `--timeout-keep-alive <int>` - Close Keep-Alive connections if no new data is received within this timeout (in seconds). **Default:** *5*.
+* `--timeout-request-body <float>` - Close the connection if no request body data is received within this timeout (in seconds). The timer starts when a request begins, is reset every time body data arrives, and is removed once the body is complete or the response starts, so slow but progressing uploads and idle Keep-Alive connections are not affected. When it fires, the application receives an `http.disconnect` event and the connection is closed. Disabled by default (*`None`*).
 * `--timeout-graceful-shutdown <int>` - Maximum number of seconds to wait for graceful shutdown. After this timeout, the server will start terminating requests.

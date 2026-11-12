@@ -169,6 +169,18 @@ def test_cli_event_size() -> None:
     assert mock_run.call_args[1]["h11_max_incomplete_event_size"] == 32768
 
 
+def test_cli_timeout_request_body() -> None:
+    runner = CliRunner()
+
+    with mock.patch.object(main, "run") as mock_run:
+        result = runner.invoke(cli, ["tests.test_cli:App", "--timeout-request-body", "2.5"])
+
+    assert result.output == ""
+    assert result.exit_code == 0
+    mock_run.assert_called_once()
+    assert mock_run.call_args[1]["timeout_request_body"] == 2.5
+
+
 def test_cli_http2() -> None:
     runner = CliRunner()
 

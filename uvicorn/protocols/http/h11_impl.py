@@ -69,6 +69,8 @@ class H11Protocol(asyncio.Protocol):
         # Timeouts
         self.timeout_keep_alive_task: asyncio.TimerHandle | None = None
         self.timeout_keep_alive = config.timeout_keep_alive
+        self.timeout_request_body_task: asyncio.TimerHandle | None = None
+        self.timeout_request_body = config.timeout_request_body
 
         # Shared server state
         self.server_state = server_state
@@ -127,6 +129,7 @@ class H11Protocol(asyncio.Protocol):
         if exc is None:
             self.transport.close()
             self._unset_keepalive_if_required()
+        self._unset_request_body_timeout_if_required()
 
     def eof_received(self) -> None:
         pass
@@ -135,6 +138,18 @@ class H11Protocol(asyncio.Protocol):
         if self.timeout_keep_alive_task is not None:
             self.timeout_keep_alive_task.cancel()
             self.timeout_keep_alive_task = None
+
+    def _set_request_body_timeout_if_required(self) -> None:
+        self._unset_request_body_timeout_if_required()
+        if self.timeout_request_body is not None:
+            self.timeout_request_body_task = self.loop.call_later(
+                self.timeout_request_body, self.timeout_request_body_handler
+            )
+
+    def _unset_request_body_timeout_if_required(self) -> None:
+        if self.timeout_request_body_task is not None:
+            self.timeout_request_body_task.cancel()
+            self.timeout_request_body_task = None
 
     def _get_upgrade(self) -> bytes | None:
         connection = []
@@ -254,6 +269,7 @@ class H11Protocol(asyncio.Protocol):
                     task = self.loop.create_task(self.cycle.run_asgi(app))
                 task.add_done_callback(self.tasks.discard)
                 self.tasks.add(task)
+                self._set_request_body_timeout_if_required()
 
             elif isinstance(event, h11.Data):
                 if self.conn.our_state is h11.DONE:
@@ -262,6 +278,7 @@ class H11Protocol(asyncio.Protocol):
                 if len(self.cycle.body) > HIGH_WATER_LIMIT:
                     self.flow.pause_reading()
                 self.cycle.message_event.set()
+                self._set_request_body_timeout_if_required()
 
             elif isinstance(event, h11.EndOfMessage):
                 if self.conn.our_state is h11.DONE:
@@ -270,6 +287,7 @@ class H11Protocol(asyncio.Protocol):
                     continue
                 self.cycle.more_body = False
                 self.cycle.message_event.set()
+                self._unset_request_body_timeout_if_required()
                 if self.conn.their_state == h11.MUST_CLOSE:
                     break
 
@@ -312,6 +330,8 @@ class H11Protocol(asyncio.Protocol):
 
     def on_response_complete(self) -> None:
         self.server_state.total_requests += 1
+
+        self._unset_request_body_timeout_if_required()
 
         if self.transport.is_closing():
             return
@@ -361,6 +381,27 @@ class H11Protocol(asyncio.Protocol):
             event = h11.ConnectionClosed()
             self.conn.send(event)
             self.transport.close()
+
+    def timeout_request_body_handler(self) -> None:
+        """
+        Called if no request body data is received within the configured idle
+        timeout. The ASGI task is woken up with a disconnect event and the
+        connection is closed to release its resources.
+        """
+        self.timeout_request_body_task = None
+        if self.transport.is_closing():
+            return
+
+        self.logger.warning("Timed out while waiting for request body. Closing connection.")
+        if self.cycle is not None:
+            self.cycle.disconnected = True
+            self.cycle.message_event.set()
+        event = h11.ConnectionClosed()
+        try:
+            self.conn.send(event)
+        except h11.LocalProtocolError:
+            pass
+        self.transport.close()
 
 
 class RequestResponseCycle:

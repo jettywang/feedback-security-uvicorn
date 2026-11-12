@@ -305,6 +305,14 @@ def _parse_headers(ctx: click.Context, param: click.Parameter, value: tuple[str,
     show_default=True,
 )
 @click.option(
+    "--timeout-request-body",
+    type=float,
+    default=None,
+    help="Close the connection if no request body data is received within this timeout (in seconds)."
+    " The timer is reset every time body data is received, and removed once the body is complete"
+    " or the response starts. Disabled by default.",
+)
+@click.option(
     "--timeout-graceful-shutdown",
     type=int,
     default=None,
@@ -440,6 +448,7 @@ def main(
     limit_max_requests: int,
     limit_max_requests_jitter: int,
     timeout_keep_alive: int,
+    timeout_request_body: float | None,
     timeout_graceful_shutdown: int | None,
     timeout_worker_healthcheck: int,
     ssl_keyfile: str,
@@ -493,6 +502,7 @@ def main(
         limit_max_requests=limit_max_requests,
         limit_max_requests_jitter=limit_max_requests_jitter,
         timeout_keep_alive=timeout_keep_alive,
+        timeout_request_body=timeout_request_body,
         timeout_graceful_shutdown=timeout_graceful_shutdown,
         timeout_worker_healthcheck=timeout_worker_healthcheck,
         ssl_keyfile=ssl_keyfile,
@@ -549,6 +559,7 @@ def run(
     limit_max_requests: int | None = None,
     limit_max_requests_jitter: int = 0,
     timeout_keep_alive: int = 5,
+    timeout_request_body: float | None = None,
     timeout_graceful_shutdown: int | None = None,
     timeout_worker_healthcheck: int = 5,
     ssl_keyfile: str | os.PathLike[str] | None = None,
@@ -606,6 +617,7 @@ def run(
         limit_max_requests=limit_max_requests,
         limit_max_requests_jitter=limit_max_requests_jitter,
         timeout_keep_alive=timeout_keep_alive,
+        timeout_request_body=timeout_request_body,
         timeout_graceful_shutdown=timeout_graceful_shutdown,
         timeout_worker_healthcheck=timeout_worker_healthcheck,
         ssl_keyfile=ssl_keyfile,

@@ -76,6 +76,8 @@ class HttpToolsProtocol(asyncio.Protocol):
         # Timeouts
         self.timeout_keep_alive_task: TimerHandle | None = None
         self.timeout_keep_alive = config.timeout_keep_alive
+        self.timeout_request_body_task: TimerHandle | None = None
+        self.timeout_request_body = config.timeout_request_body
 
         # Global state
         self.server_state = server_state
@@ -128,6 +130,7 @@ class HttpToolsProtocol(asyncio.Protocol):
         if exc is None:
             self.transport.close()
             self._unset_keepalive_if_required()
+        self._unset_request_body_timeout_if_required()
 
         self.parser = None  # type: ignore[assignment]
 
@@ -138,6 +141,18 @@ class HttpToolsProtocol(asyncio.Protocol):
         if self.timeout_keep_alive_task is not None:
             self.timeout_keep_alive_task.cancel()
             self.timeout_keep_alive_task = None
+
+    def _set_request_body_timeout_if_required(self) -> None:
+        self._unset_request_body_timeout_if_required()
+        if self.timeout_request_body is not None:
+            self.timeout_request_body_task = self.loop.call_later(
+                self.timeout_request_body, self.timeout_request_body_handler
+            )
+
+    def _unset_request_body_timeout_if_required(self) -> None:
+        if self.timeout_request_body_task is not None:
+            self.timeout_request_body_task.cancel()
+            self.timeout_request_body_task = None
 
     def _get_upgrade(self) -> bytes | None:
         connection = []
@@ -292,6 +307,7 @@ class HttpToolsProtocol(asyncio.Protocol):
         if existing_cycle is None or existing_cycle.response_complete:
             # Standard case - start processing the request.
             self._start_asgi_task(self.cycle, app)
+            self._set_request_body_timeout_if_required()
         else:
             # Pipelined HTTP requests need to be queued up.
             self.flow.pause_reading()
@@ -315,16 +331,20 @@ class HttpToolsProtocol(asyncio.Protocol):
         if len(self.cycle.body) > HIGH_WATER_LIMIT:
             self.flow.pause_reading()
         self.cycle.message_event.set()
+        self._set_request_body_timeout_if_required()
 
     def on_message_complete(self) -> None:
         if (self.parser.should_upgrade() and self._should_upgrade()) or self.cycle.response_complete:
             return
         self.cycle.more_body = False
         self.cycle.message_event.set()
+        self._unset_request_body_timeout_if_required()
 
     def on_response_complete(self) -> None:
         # Callback for pipelined HTTP requests to be started.
         self.server_state.total_requests += 1
+
+        self._unset_request_body_timeout_if_required()
 
         if self.transport.is_closing():
             return
@@ -372,6 +392,22 @@ class HttpToolsProtocol(asyncio.Protocol):
         """
         if not self.transport.is_closing():
             self.transport.close()
+
+    def timeout_request_body_handler(self) -> None:
+        """
+        Called if no request body data is received within the configured idle
+        timeout. The ASGI task is woken up with a disconnect event and the
+        connection is closed to release its resources.
+        """
+        self.timeout_request_body_task = None
+        if self.transport.is_closing():
+            return
+
+        self.logger.warning("Timed out while waiting for request body. Closing connection.")
+        if self.cycle is not None:
+            self.cycle.disconnected = True
+            self.cycle.message_event.set()
+        self.transport.close()
 
 
 class RequestResponseCycle:
