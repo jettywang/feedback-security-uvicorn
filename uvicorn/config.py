@@ -213,6 +213,7 @@ class Config:
         log_config: dict[str, Any] | str | os.PathLike[str] | RawConfigParser | IO[Any] | None = LOGGING_CONFIG,
         log_level: str | int | None = None,
         access_log: bool = True,
+        security_audit: bool = False,
         use_colors: bool | None = None,
         interface: InterfaceType = "auto",
         reload: bool = False,
@@ -266,6 +267,7 @@ class Config:
         self.log_config = log_config
         self.log_level = log_level
         self.access_log = access_log
+        self.security_audit = security_audit
         self.use_colors = use_colors
         self.interface = interface
         self.reload = reload

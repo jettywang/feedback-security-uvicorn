@@ -169,6 +169,29 @@ def test_cli_event_size() -> None:
     assert mock_run.call_args[1]["h11_max_incomplete_event_size"] == 32768
 
 
+def test_cli_security_audit() -> None:
+    runner = CliRunner()
+
+    with mock.patch.object(main, "run") as mock_run:
+        result = runner.invoke(cli, ["tests.test_cli:App", "--security-audit"])
+
+    assert result.output == ""
+    assert result.exit_code == 0
+    mock_run.assert_called_once()
+    assert mock_run.call_args[1]["security_audit"] is True
+
+
+def test_cli_security_audit_default_off() -> None:
+    runner = CliRunner()
+
+    with mock.patch.object(main, "run") as mock_run:
+        result = runner.invoke(cli, ["tests.test_cli:App"])
+
+    assert result.output == ""
+    assert result.exit_code == 0
+    assert mock_run.call_args[1]["security_audit"] is False
+
+
 def test_cli_http2() -> None:
     runner = CliRunner()
 

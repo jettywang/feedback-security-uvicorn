@@ -486,6 +486,19 @@ def test_config_access_log(access_log: bool, handlers: int) -> None:
     assert config.access_log == access_log
 
 
+def test_config_security_audit_default_off() -> None:
+    config = Config(app=asgi_app)
+    assert config.security_audit is False
+
+
+def test_config_security_audit_does_not_rewrite_log_config(logging_config: dict[str, Any]) -> None:
+    config = Config(app=asgi_app, security_audit=True, log_config=logging_config)
+    config.load()
+
+    assert "security_event" not in config.log_config["formatters"]["access"]["fmt"]
+    assert config.security_audit is True
+
+
 @pytest.mark.parametrize("log_level", [5, 10, 20, 30, 40, 50])
 def test_config_log_level(log_level: int) -> None:
     config = Config(app=asgi_app, log_level=log_level)

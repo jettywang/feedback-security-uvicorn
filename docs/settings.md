@@ -87,6 +87,7 @@ Using Uvicorn with watchfiles will enable the following options (which are other
     * If you wish to use a YAML file for your logging config, you will need to include PyYAML as a dependency for your project or install uvicorn with the `[standard]` optional extras.
 * `--log-level <str>` - Set the log level. **Options:** *'critical', 'error', 'warning', 'info', 'debug', 'trace'.* **Default:** *'info'*.
 * `--no-access-log` - Disable access log only, without changing log level.
+* `--security-audit / --no-security-audit` - Include bounded authentication result and operation ID fields in the access log, read from the ASGI request state. **Default:** *False*.
 * `--use-colors / --no-use-colors` - Enable / disable colorized formatting of the log records. If not set, colors will be auto-detected. This option is ignored if the `--log-config` CLI option is used.
 
 ## Implementation

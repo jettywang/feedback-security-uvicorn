@@ -24,6 +24,7 @@ from uvicorn.config import Config
 from uvicorn.logging import TRACE_LOG_LEVEL
 from uvicorn.protocols.http.flow_control import CLOSE_HEADER, HIGH_WATER_LIMIT, FlowControl, service_unavailable
 from uvicorn.protocols.utils import get_client_addr, get_local_addr, get_path_with_query_string, get_remote_addr, is_ssl
+from uvicorn.security_audit import log_security_audit
 from uvicorn.server import ServerState
 
 
@@ -241,6 +242,7 @@ class H11Protocol(asyncio.Protocol):
                     logger=self.logger,
                     access_logger=self.access_logger,
                     access_log=self.access_log,
+                    security_audit=self.config.security_audit,
                     default_headers=self.server_state.default_headers,
                     message_event=asyncio.Event(),
                     on_response=self.on_response_complete,
@@ -376,6 +378,7 @@ class RequestResponseCycle:
         default_headers: list[tuple[bytes, bytes]],
         message_event: asyncio.Event,
         on_response: Callable[..., None],
+        security_audit: bool = False,
     ) -> None:
         self.scope = scope
         self.conn = conn
@@ -384,6 +387,7 @@ class RequestResponseCycle:
         self.logger = logger
         self.access_logger = access_logger
         self.access_log = access_log
+        self.security_audit = security_audit
         self.default_headers = default_headers
         self.message_event = message_event
         self.on_response = on_response
@@ -401,6 +405,22 @@ class RequestResponseCycle:
         self.response_started = False
         self.response_complete = False
 
+        # Security audit state
+        self.status: int | None = None
+        self.asgi_failed = False
+        self.security_audit_logged = False
+
+    def log_security_audit(self) -> None:
+        if not self.security_audit or self.security_audit_logged:
+            return
+        self.security_audit_logged = True
+        log_security_audit(
+            self.access_logger,
+            self.scope,
+            status=self.status,
+            failed=self.asgi_failed,
+        )
+
     # ASGI exception wrapper
     async def run_asgi(self, app: ASGI3Application) -> None:
         try:
@@ -408,6 +428,7 @@ class RequestResponseCycle:
                 self.scope, self.receive, self.send
             )
         except BaseException as exc:
+            self.asgi_failed = True
             msg = "Exception in ASGI application\n"
             self.logger.error(msg, exc_info=exc)
             if not self.response_started:
@@ -416,18 +437,22 @@ class RequestResponseCycle:
                 self.transport.close()
         else:
             if result is not None:
+                self.asgi_failed = True
                 msg = "ASGI callable should return None, but returned '%s'."
                 self.logger.error(msg, result)
                 self.transport.close()
             elif not self.response_started and not self.disconnected:
+                self.asgi_failed = True
                 msg = "ASGI callable returned without starting response."
                 self.logger.error(msg)
                 await self.send_500_response()
             elif not self.response_complete and not self.disconnected:
+                self.asgi_failed = True
                 msg = "ASGI callable returned without completing response."
                 self.logger.error(msg)
                 self.transport.close()
         finally:
+            self.log_security_audit()
             self.on_response = lambda: None
 
     async def send_500_response(self) -> None:
@@ -464,12 +489,13 @@ class RequestResponseCycle:
             self.waiting_for_100_continue = False
 
             status = message["status"]
+            self.status = status
             headers = self.default_headers + list(message.get("headers", []))
 
             if CLOSE_HEADER in self.scope["headers"] and CLOSE_HEADER not in headers:
                 headers = headers + [CLOSE_HEADER]
 
-            if self.access_log:
+            if self.access_log and not self.security_audit:
                 self.access_logger.info(
                     '%s - "%s %s HTTP/%s" %d',
                     get_client_addr(self.scope),

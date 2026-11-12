@@ -4,7 +4,7 @@ import http
 import logging
 import sys
 from copy import copy
-from typing import Literal
+from typing import Any, Literal
 
 from uvicorn._ansi import style as ansi_style
 
@@ -114,4 +114,27 @@ class AccessFormatter(ColourizedFormatter):
                 "status_code": status_code,
             }
         )
+        # Security audit fields are opt-in and carried as `extra`. Append them
+        # to the message so the default format and standard formatters expose
+        # them without needing a custom format string.
+        security_audit: Any = getattr(recordcopy, "security_audit", None)
+        if isinstance(security_audit, dict):
+            recordcopy.security_event = security_audit.get("event") or ""
+            recordcopy.auth_result = security_audit.get("auth_result") or "-"
+            recordcopy.operation_id = security_audit.get("operation_id") or "-"
+        else:
+            recordcopy.security_event = ""
+            recordcopy.auth_result = ""
+            recordcopy.operation_id = ""
         return super().formatMessage(recordcopy)
+
+    def format(self, record: logging.LogRecord) -> str:
+        formatted = super().format(record)
+        security_audit: Any = getattr(record, "security_audit", None)
+        if isinstance(security_audit, dict):
+            formatted += (
+                " security_event=" + str(security_audit.get("event") or "")
+                + " auth_result=" + str(security_audit.get("auth_result") or "-")
+                + " operation_id=" + str(security_audit.get("operation_id") or "-")
+            )
+        return formatted

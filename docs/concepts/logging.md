@@ -54,6 +54,49 @@ LOGGING_CONFIG = {
 }
 ```
 
+### Security Audit Fields
+
+Access logs can optionally carry the authentication result an application
+middleware has already established. Enable it with `--security-audit`, or
+`security_audit=True` when calling `uvicorn.run()`. It is disabled by default,
+and it only affects the access record.
+
+The application registers the bounded context in the ASGI request state:
+
+```python
+from uvicorn.security_audit import set_security_audit
+
+async def middleware(scope, receive, send):
+    # One of "anonymous", "verified" or "denied".
+    set_security_audit(scope, auth_result="verified", operation_id="checkout-42")
+    await app(scope, receive, send)
+```
+
+The same values can be written directly to
+`scope["state"]["uvicorn.security_audit"]`. Values from request headers, the
+query string or the body are ignored; the state is the only accepted boundary.
+`auth_result` is restricted to the three classifications above, anything else
+is dropped. `operation_id` is truncated to 128 characters and non-printable or
+whitespace characters are replaced with `_`, so it cannot add log lines.
+
+Each finished request produces one access record with these fields:
+
+| Field            | Meaning                                                        |
+|------------------|----------------------------------------------------------------|
+| `security_event` | `response`, `denied` or `error`                                |
+| `auth_result`    | `anonymous`, `verified`, `denied` or empty                     |
+| `operation_id`   | The bounded operation identifier, or empty                     |
+| `security_audit` | A dictionary with the same classification plus client/path/status |
+
+`denied` marks an application that explicitly rejected the request
+(`auth_result="denied"`), while `error` marks an application that raised
+before completing the response. Ordinary responses use `response`, so all
+three are distinguishable. When the option is enabled, `AccessFormatter`
+appends `security_event=<...> auth_result=<...> operation_id=<...>` to each
+access line, including configurations that format with `%(message)s`. The
+fields are also available as log-record attributes for machine-readable
+collection.
+
 ## Custom Logging Configuration
 
 You can supply a custom logging configuration file with the `--log-config`
