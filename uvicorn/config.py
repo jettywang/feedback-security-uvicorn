@@ -208,6 +208,7 @@ class Config:
         ws_ping_interval: float | None = 20.0,
         ws_ping_timeout: float | None = 20.0,
         ws_per_message_deflate: bool = True,
+        ws_audit: bool = False,
         lifespan: LifespanType = "auto",
         env_file: str | os.PathLike[str] | None = None,
         log_config: dict[str, Any] | str | os.PathLike[str] | RawConfigParser | IO[Any] | None = LOGGING_CONFIG,
@@ -262,6 +263,7 @@ class Config:
         self.ws_ping_interval = ws_ping_interval
         self.ws_ping_timeout = ws_ping_timeout
         self.ws_per_message_deflate = ws_per_message_deflate
+        self.ws_audit = ws_audit
         self.lifespan = lifespan
         self.log_config = log_config
         self.log_level = log_level
@@ -426,6 +428,18 @@ class Config:
         if self.access_log is False:
             logging.getLogger("uvicorn.access").handlers = []
             logging.getLogger("uvicorn.access").propagate = False
+        if self.ws_audit:
+            self.configure_ws_audit_logging()
+
+    def configure_ws_audit_logging(self) -> None:
+        # Reuse uvicorn's default handler so audit records share the standard
+        # stream and formatting without constructing extra handlers. Fall back
+        # to a stream handler for custom log configurations that omit it.
+        audit_logger = logging.getLogger("uvicorn.websocket.audit")
+        default_handlers = logging.getLogger("uvicorn").handlers
+        audit_logger.handlers = list(default_handlers) or [logging.StreamHandler()]
+        audit_logger.setLevel(logging.INFO)
+        audit_logger.propagate = False
 
     def load_app(self) -> Any:
         """Import the app and return it. Exits on failure."""

@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
+import logging
+from collections.abc import Iterator
 from copy import deepcopy
 from typing import TYPE_CHECKING, Any, TypeAlias, TypedDict
 
@@ -11,7 +14,7 @@ from websockets import __version__ as websockets_version
 from websockets.asyncio.client import ClientConnection, connect
 from websockets.client import ClientProtocol
 from websockets.extensions.permessage_deflate import ClientPerMessageDeflateFactory
-from websockets.frames import CloseCode, Frame, Opcode
+from websockets.frames import Close, CloseCode, Frame, Opcode
 from websockets.typing import Subprotocol
 from websockets.uri import parse_uri
 
@@ -30,6 +33,13 @@ from uvicorn._types import (
     WebSocketResponseStartEvent,
 )
 from uvicorn.config import Config
+from uvicorn.protocols.websockets.audit import (
+    AUDIT_LOGGER_NAME,
+    AuditPhase,
+    AuditStatus,
+    WebSocketAuditEvent,
+    classify_close_code,
+)
 from uvicorn.protocols.websockets.websockets_sansio_impl import WebSocketsSansIOProtocol
 from uvicorn.server import ServerState
 
@@ -1541,8 +1551,15 @@ class MockWebSocketConnection:
         ws_protocol_cls: WSProtocol,
         http_protocol_cls: HTTPProtocol,
         close_timeout: float = 10.0,
+        ws_audit: bool = False,
     ) -> None:
-        config = Config(app=app, ws=ws_protocol_cls, http=http_protocol_cls, lifespan="off")
+        config = Config(
+            app=app,
+            ws=ws_protocol_cls,
+            http=http_protocol_cls,
+            lifespan="off",
+            ws_audit=ws_audit,
+        )
         config.load()
         self._server_state = ServerState()
         self._protocol = ws_protocol_cls(config=config, server_state=self._server_state, app_state={})
@@ -1923,3 +1940,238 @@ async def test_server_keepalive_disabled(
             protocol = list(server.server_state.connections)[0]
             assert isinstance(protocol, (_WSProtocol, WebSocketsSansIOProtocol))
             assert protocol.ping_timer is None
+
+
+# ---------------------------------------------------------------------------
+# Optional WebSocket audit projection (synthetic, in-process events)
+# ---------------------------------------------------------------------------
+
+
+class AuditRecordHandler(logging.Handler):
+    """Collects the structured audit payloads attached by the protocol backends."""
+
+    def __init__(self) -> None:
+        super().__init__(level=logging.INFO)
+        self.events: list[dict[str, Any]] = []
+
+    def emit(self, record: logging.LogRecord) -> None:
+        self.events.append(record.websocket_audit)  # type: ignore[attr-defined]
+
+
+@contextlib.contextmanager
+def capture_ws_audit(connection: MockWebSocketConnection) -> Iterator[AuditRecordHandler]:
+    # `MockWebSocketConnection` already ran `Config.load()`, whose `dictConfig`
+    # replaces the audit logger's handlers; attaching afterwards survives it.
+    handler = AuditRecordHandler()
+    logger = logging.getLogger(AUDIT_LOGGER_NAME)
+    old_propagate = logger.propagate
+    logger.addHandler(handler)
+    logger.propagate = True
+    try:
+        yield handler
+    finally:
+        logger.removeHandler(handler)
+        logger.propagate = old_propagate
+
+
+async def reject_handshake_app(scope: Scope, receive: ASGIReceiveCallable, send: ASGISendCallable) -> None:
+    await receive()  # websocket.connect
+    await send({"type": "websocket.close"})
+
+
+@pytest.mark.parametrize(
+    "code, expected",
+    [
+        (1000, AuditStatus.CLOSED),
+        (1001, AuditStatus.CLOSED),
+        (1009, AuditStatus.CLOSED),
+        (1011, AuditStatus.CLOSED),
+        (1012, AuditStatus.CLOSED),
+        (3000, AuditStatus.CLOSED),
+        (4999, AuditStatus.CLOSED),
+        (1005, AuditStatus.ABNORMAL),
+        (1006, AuditStatus.ABNORMAL),
+        (None, AuditStatus.ABNORMAL),
+    ],
+)
+def test_ws_audit_close_code_projection(code: int | None, expected: AuditStatus) -> None:
+    assert classify_close_code(code) is expected
+
+
+def test_ws_audit_event_has_a_stable_bounded_shape() -> None:
+    event = WebSocketAuditEvent(
+        phase=AuditPhase.SESSION,
+        status=AuditStatus.CLOSED,
+        client="127.0.0.1:8001",
+        path="/ws?x=1",
+    )
+    assert set(event.as_dict()) == {"phase", "status", "client", "path"}
+    assert event.as_dict() == {
+        "phase": "session",
+        "status": "closed",
+        "client": "127.0.0.1:8001",
+        "path": "/ws?x=1",
+    }
+
+
+async def accept_then_hold_app(scope: Scope, receive: ASGIReceiveCallable, send: ASGISendCallable) -> None:
+    await receive()  # websocket.connect
+    await send({"type": "websocket.accept"})
+    # Hold the application open until the test ends the connection.
+    await receive()
+
+
+def assert_audit_event(events: list[dict[str, Any]], phase: AuditPhase, status: AuditStatus) -> None:
+    assert events == [
+        {
+            "phase": phase.value,
+            "status": status.value,
+            "client": "127.0.0.1:8001",
+            "path": "/",
+        }
+    ]
+    # The projection must never carry a close code or a business reason.
+    assert all("code" not in event and "reason" not in event for event in events)
+
+
+async def test_ws_audit_disabled_by_default(
+    ws_protocol_cls: WSProtocol, http_protocol_cls: HTTPProtocol
+):
+    connection = MockWebSocketConnection(accept_then_close_app, ws_protocol_cls, http_protocol_cls)
+    async with connection:
+        await connection.app_finished()
+        connection.reply_to_server_close()
+
+    assert connection._protocol._ws_audit_emitted is False
+
+
+async def test_ws_audit_handshake_rejection(
+    ws_protocol_cls: WSProtocol, http_protocol_cls: HTTPProtocol
+):
+    connection = MockWebSocketConnection(
+        reject_handshake_app, ws_protocol_cls, http_protocol_cls, ws_audit=True
+    )
+    with capture_ws_audit(connection) as handler:
+        async with connection:
+            await connection.app_finished()
+
+    assert connection.transport_closed
+    assert_audit_event(handler.events, AuditPhase.HANDSHAKE, AuditStatus.REJECTED)
+
+
+async def test_ws_audit_accepted_close_is_categorized(
+    ws_protocol_cls: WSProtocol, http_protocol_cls: HTTPProtocol
+):
+    connection = MockWebSocketConnection(accept_then_close_app, ws_protocol_cls, http_protocol_cls, ws_audit=True)
+    with capture_ws_audit(connection) as handler:
+        async with connection:
+            await connection.app_finished()
+            connection.reply_to_server_close()
+
+    assert connection.transport_closed
+    assert_audit_event(handler.events, AuditPhase.SESSION, AuditStatus.CLOSED)
+
+
+async def test_ws_audit_peer_close(ws_protocol_cls: WSProtocol, http_protocol_cls: HTTPProtocol):
+    connection = MockWebSocketConnection(accept_then_hold_app, ws_protocol_cls, http_protocol_cls, ws_audit=True)
+    with capture_ws_audit(connection) as handler:
+        async with connection:
+            await asyncio.sleep(0)  # let the application accept the handshake
+            connection.send_close()
+            await connection.app_finished()
+
+    assert_audit_event(handler.events, AuditPhase.SESSION, AuditStatus.CLOSED)
+
+
+async def test_ws_audit_connection_lost_before_handshake(
+    ws_protocol_cls: WSProtocol, http_protocol_cls: HTTPProtocol
+):
+    connection = MockWebSocketConnection(accept_then_hold_app, ws_protocol_cls, http_protocol_cls, ws_audit=True)
+    with capture_ws_audit(connection) as handler:
+        # Drive connection_made + the handshake request, then drop the transport
+        # before the application can accept or reject.
+        await connection.__aenter__()
+        connection.connection_lost()
+        await connection.app_finished()
+
+    assert_audit_event(handler.events, AuditPhase.HANDSHAKE, AuditStatus.ABNORMAL)
+
+
+async def test_ws_audit_connection_lost_after_accept(
+    ws_protocol_cls: WSProtocol, http_protocol_cls: HTTPProtocol
+):
+    async def accept_app(scope: Scope, receive: ASGIReceiveCallable, send: ASGISendCallable):
+        await receive()
+        await send({"type": "websocket.accept"})
+        try:
+            await receive()
+        except OSError:
+            pass
+
+    connection = MockWebSocketConnection(accept_app, ws_protocol_cls, http_protocol_cls, ws_audit=True)
+    with capture_ws_audit(connection) as handler:
+        async with connection:
+            await asyncio.sleep(0)
+            connection.connection_lost()
+            await connection.app_finished()
+
+    assert_audit_event(handler.events, AuditPhase.SESSION, AuditStatus.ABNORMAL)
+
+
+async def test_ws_audit_emits_a_single_event_per_connection(
+    ws_protocol_cls: WSProtocol, http_protocol_cls: HTTPProtocol
+):
+    connection = MockWebSocketConnection(accept_then_close_app, ws_protocol_cls, http_protocol_cls, ws_audit=True)
+    with capture_ws_audit(connection) as handler:
+        async with connection:
+            await connection.app_finished()
+            connection.reply_to_server_close()
+            # A late transport-loss notification must not produce a second event.
+            connection.connection_lost()
+
+    assert len(handler.events) == 1
+
+
+async def test_ws_audit_backends_emit_identical_projection(
+    ws_protocol_cls: WSProtocol, http_protocol_cls: HTTPProtocol
+):
+    connection = MockWebSocketConnection(accept_then_close_app, ws_protocol_cls, http_protocol_cls, ws_audit=True)
+    with capture_ws_audit(connection) as handler:
+        async with connection:
+            await connection.app_finished()
+            connection.reply_to_server_close()
+
+    assert handler.events == [
+        {"phase": "session", "status": "closed", "client": "127.0.0.1:8001", "path": "/"}
+    ]
+
+
+async def test_ws_audit_reason_and_code_reach_the_client(
+    ws_protocol_cls: WSProtocol, http_protocol_cls: HTTPProtocol
+):
+    business_code = 1001
+    business_reason = "tenant-quota-exhausted"
+
+    async def app(scope: Scope, receive: ASGIReceiveCallable, send: ASGISendCallable):
+        await receive()
+        await send({"type": "websocket.accept"})
+        await receive()
+        await send({"type": "websocket.close", "code": business_code, "reason": business_reason})
+
+    connection = MockWebSocketConnection(app, ws_protocol_cls, http_protocol_cls, ws_audit=True)
+    with capture_ws_audit(connection) as handler:
+        async with connection:
+            await asyncio.sleep(0)  # let the application accept the handshake
+            connection.send_text("ping")
+            await connection.app_finished()
+            # Decode the server's close frame as the client sees it.
+            events = connection._read_server_output()
+
+    close_frames = [event for event in events if isinstance(event, Frame) and event.opcode == Opcode.CLOSE]
+    assert len(close_frames) == 1
+    client_close = Close.parse(bytes(close_frames[0].data))
+    assert client_close.code == business_code
+    assert client_close.reason == business_reason
+    # The audit log keeps only the category; the business reason never reaches it.
+    assert_audit_event(handler.events, AuditPhase.SESSION, AuditStatus.CLOSED)
+    assert all(business_reason not in str(event) for event in handler.events)

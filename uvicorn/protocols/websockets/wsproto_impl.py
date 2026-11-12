@@ -32,6 +32,7 @@ from uvicorn.protocols.utils import (
     get_remote_addr,
     is_ssl,
 )
+from uvicorn.protocols.websockets.audit import AuditPhase, AuditStatus, WebSocketAuditMixin, classify_close_code
 from uvicorn.server import ServerState
 
 
@@ -65,7 +66,7 @@ class WebsocketBuffer:
         return {"type": "websocket.receive", "bytes": self.value.getvalue()}
 
 
-class WSProtocol(asyncio.Protocol):
+class WSProtocol(WebSocketAuditMixin, asyncio.Protocol):
     def __init__(
         self,
         config: Config,
@@ -73,6 +74,7 @@ class WSProtocol(asyncio.Protocol):
         app_state: dict[str, Any],
         _loop: asyncio.AbstractEventLoop | None = None,
     ) -> None:
+        WebSocketAuditMixin.__init__(self)
         if not config.loaded:
             config.load()  # pragma: full coverage
 
@@ -142,6 +144,7 @@ class WSProtocol(asyncio.Protocol):
         code = 1005 if self.handshake_complete and not self.response_started else 1006
         self.queue.put_nowait({"type": "websocket.disconnect", "code": code})
         self.connections.remove(self)
+        self.audit_connection_lost()
 
         if self.logger.level <= TRACE_LOG_LEVEL:
             prefix = "%s:%d - " % self.client if self.client else ""
@@ -167,6 +170,10 @@ class WSProtocol(asyncio.Protocol):
             # TODO: Remove `type: ignore` when wsproto fixes the type annotation.
             self.transport.write(self.conn.send(err.event_hint))  # type: ignore[arg-type]  # noqa: E501
             self.transport.close()
+            self.audit_closed(
+                AuditPhase.SESSION if self._ws_accepted else AuditPhase.HANDSHAKE,
+                AuditStatus.ABNORMAL,
+            )
         except LocalProtocolError:
             # Data received after the close handshake completed, e.g. a pong the client
             # sent while the server's close was in flight.
@@ -262,6 +269,7 @@ class WSProtocol(asyncio.Protocol):
             if not self.transport.is_closing():
                 self.transport.write(self.conn.send(wsproto.events.CloseConnection(code=1009, reason=reason)))
                 self.transport.close()
+            self.audit_closed(AuditPhase.SESSION, AuditStatus.ABNORMAL)
             return
         if event.message_finished:
             self.queue.put_nowait(self.buffer.to_message())
@@ -282,6 +290,7 @@ class WSProtocol(asyncio.Protocol):
             self.transport.write(self.conn.send(event.response()))
         self.queue.put_nowait({"type": "websocket.disconnect", "code": event.code, "reason": event.reason})
         self.transport.close()
+        self.audit_closed(AuditPhase.SESSION, classify_close_code(event.code))
 
     def handle_ping(self, event: events.Ping) -> None:
         self.transport.write(self.conn.send(event.response()))
@@ -344,6 +353,7 @@ class WSProtocol(asyncio.Protocol):
         self.transport.write(self.conn.send(wsproto.events.CloseConnection(code=1011, reason=reason)))
         self.close_sent = True
         self.transport.close()
+        self.audit_closed(AuditPhase.SESSION, AuditStatus.ABNORMAL)
 
     def send_500_response(self) -> None:
         if self.response_started or self.handshake_complete:
@@ -394,6 +404,7 @@ class WSProtocol(asyncio.Protocol):
                     extensions.append(PerMessageDeflate())
                 if not self.transport.is_closing():
                     self.handshake_complete = True
+                    self._ws_accepted = True
                     output = self.conn.send(
                         wsproto.events.AcceptConnection(
                             subprotocol=subprotocol,
@@ -417,6 +428,7 @@ class WSProtocol(asyncio.Protocol):
                 output = self.conn.send(event)
                 self.transport.write(output)
                 self.transport.close()
+                self.audit_handshake_rejected()
 
             elif message["type"] == "websocket.http.response.start":
                 # ensure status code is in the valid range
@@ -467,6 +479,7 @@ class WSProtocol(asyncio.Protocol):
                             self.read_paused = False
                             self.transport.resume_reading()
                         self.close_timer = self.loop.call_later(self.close_timeout, self.transport.close)
+                    self.audit_closed(AuditPhase.SESSION, classify_close_code(code))
 
                 else:
                     raise RuntimeError(

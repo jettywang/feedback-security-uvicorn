@@ -100,6 +100,12 @@ Using Uvicorn with watchfiles will enable the following options (which are other
 * `--ws-ping-interval <float>` - Set the WebSockets ping interval, in seconds. **Default:** *20.0*.
 * `--ws-ping-timeout <float>` - Set the WebSockets ping timeout, in seconds. **Default:** *20.0*.
 * `--ws-per-message-deflate <bool>` - Enable/disable WebSocket per-message-deflate compression. Only available with the `websockets` protocol. **Default:** *True*.
+* `--ws-audit <bool>` - Emit one audit record per WebSocket connection when it ends, on the
+  `uvicorn.websocket.audit` logger. Each record is a security projection: it only contains a stable
+  lifecycle `phase` (`handshake` or `session`) and a coarse `status` (`rejected`, `closed`, or
+  `abnormal`), plus the client address and path. Close codes are only used to choose a status
+  category, and business close reasons are never logged. The close code and reason delivered to the
+  client are unchanged. **Default:** *False*.
 * `--lifespan <str>` - Set the Lifespan protocol implementation. **Options:** *'auto', 'on', 'off'.* **Default:** *'auto'*.
 * `--h11-max-incomplete-event-size <int>` - Set the maximum number of bytes to buffer of an incomplete event. Only available for `h11` HTTP protocol implementation. **Default:** *16384* (16 KB).
 

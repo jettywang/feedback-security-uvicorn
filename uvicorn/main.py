@@ -192,6 +192,14 @@ def _parse_headers(ctx: click.Context, param: click.Parameter, value: tuple[str,
     show_default=True,
 )
 @click.option(
+    "--ws-audit/--no-ws-audit",
+    default=False,
+    help="Log a stable, redacted audit event when each WebSocket connection ends. "
+    "Only the lifecycle phase and a coarse status category are recorded; "
+    "the close code and business reason are projected away.",
+    show_default=True,
+)
+@click.option(
     "--lifespan",
     type=LIFESPAN_CHOICES,
     default="auto",
@@ -418,6 +426,7 @@ def main(
     ws_ping_interval: float,
     ws_ping_timeout: float,
     ws_per_message_deflate: bool,
+    ws_audit: bool,
     lifespan: LifespanType,
     interface: InterfaceType,
     reload: bool,
@@ -471,6 +480,7 @@ def main(
         ws_ping_interval=ws_ping_interval,
         ws_ping_timeout=ws_ping_timeout,
         ws_per_message_deflate=ws_per_message_deflate,
+        ws_audit=ws_audit,
         lifespan=lifespan,
         env_file=env_file,
         log_config=LOGGING_CONFIG if log_config is None else log_config,
@@ -527,6 +537,7 @@ def run(
     ws_ping_interval: float | None = 20.0,
     ws_ping_timeout: float | None = 20.0,
     ws_per_message_deflate: bool = True,
+    ws_audit: bool = False,
     lifespan: LifespanType = "auto",
     interface: InterfaceType = "auto",
     reload: bool = False,
@@ -584,6 +595,7 @@ def run(
         ws_ping_interval=ws_ping_interval,
         ws_ping_timeout=ws_ping_timeout,
         ws_per_message_deflate=ws_per_message_deflate,
+        ws_audit=ws_audit,
         lifespan=lifespan,
         interface=interface,
         reload=reload,

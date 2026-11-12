@@ -34,6 +34,7 @@ from uvicorn.protocols.utils import (
     get_remote_addr,
     is_ssl,
 )
+from uvicorn.protocols.websockets.audit import AuditPhase, AuditStatus, WebSocketAuditMixin, classify_close_code
 from uvicorn.server import ServerState
 
 
@@ -47,7 +48,7 @@ def _get_status_phrase(status_code: int) -> str:
 STATUS_PHRASES = {status_code: _get_status_phrase(status_code) for status_code in range(100, 600)}
 
 
-class WebSocketsSansIOProtocol(asyncio.Protocol):
+class WebSocketsSansIOProtocol(WebSocketAuditMixin, asyncio.Protocol):
     def __init__(
         self,
         config: Config,
@@ -55,6 +56,7 @@ class WebSocketsSansIOProtocol(asyncio.Protocol):
         app_state: dict[str, Any],
         _loop: asyncio.AbstractEventLoop | None = None,
     ) -> None:
+        WebSocketAuditMixin.__init__(self)
         if not config.loaded:
             config.load()  # pragma: no cover
 
@@ -137,6 +139,7 @@ class WebSocketsSansIOProtocol(asyncio.Protocol):
         code = 1005 if self.handshake_complete and self.initial_response is None else 1006
         self.queue.put_nowait({"type": "websocket.disconnect", "code": code})
         self.connections.remove(self)
+        self.audit_connection_lost()
 
         if self.logger.level <= TRACE_LOG_LEVEL:
             prefix = "%s:%d - " % self.client if self.client else ""
@@ -228,6 +231,7 @@ class WebSocketsSansIOProtocol(asyncio.Protocol):
             output = self.conn.data_to_send()
             self.transport.write(b"".join(output))
             self.transport.close()
+            self.audit_closed(AuditPhase.HANDSHAKE, AuditStatus.ABNORMAL)
             return
 
         # websockets 17.0 documents that non-ASCII header values are encoded
@@ -367,6 +371,7 @@ class WebSocketsSansIOProtocol(asyncio.Protocol):
         self.transport.write(b"".join(self.conn.data_to_send()))
         self.close_sent = True
         self.transport.close()
+        self.audit_closed(AuditPhase.SESSION, AuditStatus.ABNORMAL)
 
     def handle_close(self, event: Frame) -> None:
         if self.close_sent:
@@ -385,6 +390,7 @@ class WebSocketsSansIOProtocol(asyncio.Protocol):
             output = self.conn.data_to_send()
             self.transport.write(b"".join(output))
             self.transport.close()
+            self.audit_closed(AuditPhase.SESSION, classify_close_code(code))
 
     def handle_parser_exception(self) -> None:  # pragma: no cover
         assert self.conn.close_sent is not None
@@ -396,6 +402,10 @@ class WebSocketsSansIOProtocol(asyncio.Protocol):
         self.transport.write(b"".join(output))
         self.close_sent = True
         self.transport.close()
+        self.audit_closed(
+            AuditPhase.SESSION if self._ws_accepted else AuditPhase.HANDSHAKE,
+            AuditStatus.ABNORMAL,
+        )
 
     def handle_handshake_exception(self) -> None:
         # websockets couldn't parse the handshake request. It queues a 414/431 for exceeded limits
@@ -407,6 +417,7 @@ class WebSocketsSansIOProtocol(asyncio.Protocol):
             output = self.conn.reject(400, "Failed to open a WebSocket connection: invalid request.\n").serialize()
         self.transport.write(output)
         self.transport.close()
+        self.audit_closed(AuditPhase.HANDSHAKE, AuditStatus.ABNORMAL)
 
     def on_task_complete(self, task: asyncio.Task[None]) -> None:
         self.tasks.discard(task)
@@ -461,6 +472,7 @@ class WebSocketsSansIOProtocol(asyncio.Protocol):
 
                 if not self.transport.is_closing():
                     self.handshake_complete = True
+                    self._ws_accepted = True
                     self.conn.send_response(self.response)
                     output = self.conn.data_to_send()
                     self.transport.write(b"".join(output))
@@ -480,6 +492,7 @@ class WebSocketsSansIOProtocol(asyncio.Protocol):
                 self.handshake_complete = True
                 self.transport.write(b"".join(output))
                 self.transport.close()
+                self.audit_handshake_rejected()
             elif message["type"] == "websocket.http.response.start" and self.initial_response is None:
                 if not (100 <= message["status"] < 600):
                     raise RuntimeError("Invalid HTTP status code '%d' in response." % message["status"])
@@ -526,6 +539,7 @@ class WebSocketsSansIOProtocol(asyncio.Protocol):
                             self.read_paused = False
                             self.transport.resume_reading()
                         self.close_timer = self.loop.call_later(self.close_timeout, self.transport.close)
+                        self.audit_closed(AuditPhase.SESSION, classify_close_code(code))
                 else:
                     raise RuntimeError(
                         f"Expected ASGI message 'websocket.send' or 'websocket.close', but got '{message['type']}'."
