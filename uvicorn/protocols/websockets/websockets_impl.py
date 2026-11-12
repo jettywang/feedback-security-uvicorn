@@ -29,6 +29,7 @@ from uvicorn._types import (
 from uvicorn.config import Config, UvicornDeprecationWarning
 from uvicorn.logging import TRACE_LOG_LEVEL
 from uvicorn.protocols.utils import (
+    DIRECT_CLIENT_EXTENSION,
     ClientDisconnected,
     get_client_addr,
     get_local_addr,
@@ -208,7 +209,7 @@ class WebSocketProtocol(WebSocketServerProtocol):
             "headers": asgi_headers,
             "subprotocols": subprotocols,
             "state": self.app_state.copy(),
-            "extensions": {"websocket.http.response": {}},
+            "extensions": {"websocket.http.response": {}, DIRECT_CLIENT_EXTENSION: {"client": self.client}},
         }
         task = self.loop.create_task(self.run_asgi())
         task.add_done_callback(self.on_task_complete)

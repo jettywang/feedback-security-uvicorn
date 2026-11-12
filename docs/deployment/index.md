@@ -279,6 +279,29 @@ For more information, check [`ProxyHeadersMiddleware`](https://github.com/Kludex
 Currently if the `ProxyHeadersMiddleware` is able to retrieve a trusted client value then the client's port will be set to `0`.
 This is because port information is lost when using these headers.
 
+### Auditing direct vs. resolved client addresses
+
+The client address flows through Uvicorn in two distinct forms:
+
+1. The **direct peer** is read from the transport when the connection is opened (`get_remote_addr()` in `uvicorn/protocols/utils.py`). Uvicorn records it in the ASGI scope under the extension key `scope["extensions"]["uvicorn.direct_client"]["client"]`, and it is never modified afterwards.
+2. The **effective address** is `scope["client"]`. It starts as a copy of the direct peer, but `ProxyHeadersMiddleware` rewrites it (and `scope["scheme"]`) in place when the direct peer is trusted and forwarded headers are present. This is the address the application sees, and it is also the address printed in access logs, so an access-log client may be either the connecting party or an address resolved from proxy headers.
+
+Audit middleware that needs to tell the two apart can read both from the scope, or use the helper `get_client_security_summary(scope)` from `uvicorn.protocols.utils`, which returns `{"direct": ..., "effective": ..., "proxied": ...}`. `proxied` is true exactly when the two addresses differ, i.e. the effective address came from forwarded headers rather than from the connection itself.
+
+```python
+from uvicorn.protocols.utils import get_client_security_summary
+
+
+async def audit_middleware(scope, receive, send):
+    if scope["type"] in {"http", "websocket"}:
+        summary = get_client_security_summary(scope)
+        # e.g. {"direct": "10.0.0.1:50124", "effective": "203.0.113.7:0", "proxied": True}
+        audit_log.info("connection client=%s", summary)
+    return await app(scope, receive, send)
+```
+
+For WebSockets the same scope object (and therefore the same `uvicorn.direct_client` extension) is used for the opening handshake and for the lifetime of the connection, so audit records taken before and after the upgrade can be correlated to the same connection.
+
 ### UNIX Domain Sockets (UDS)
 
 Although it is common for UNIX Domain Sockets to be used for communicating between various HTTP servers, they can mess with some of the expected received values as they will be various non-address strings or missing values.

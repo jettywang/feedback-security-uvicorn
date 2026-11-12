@@ -25,6 +25,7 @@ from uvicorn._types import (
 from uvicorn.config import Config
 from uvicorn.logging import TRACE_LOG_LEVEL
 from uvicorn.protocols.utils import (
+    DIRECT_CLIENT_EXTENSION,
     ClientDisconnected,
     get_client_addr,
     get_local_addr,
@@ -245,7 +246,7 @@ class WSProtocol(asyncio.Protocol):
             "headers": headers,
             "subprotocols": event.subprotocols,
             "state": self.app_state.copy(),
-            "extensions": {"websocket.http.response": {}},
+            "extensions": {"websocket.http.response": {}, DIRECT_CLIENT_EXTENSION: {"client": self.client}},
         }
         self.queue.put_nowait({"type": "websocket.connect"})
         task = self.loop.create_task(self.run_asgi())

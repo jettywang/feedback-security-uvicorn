@@ -22,7 +22,14 @@ from uvicorn._types import (
 from uvicorn.config import Config
 from uvicorn.logging import TRACE_LOG_LEVEL
 from uvicorn.protocols.http.flow_control import HIGH_WATER_LIMIT, FlowControl, service_unavailable
-from uvicorn.protocols.utils import get_client_addr, get_local_addr, get_path_with_query_string, get_remote_addr, is_ssl
+from uvicorn.protocols.utils import (
+    DIRECT_CLIENT_EXTENSION,
+    get_client_addr,
+    get_local_addr,
+    get_path_with_query_string,
+    get_remote_addr,
+    is_ssl,
+)
 from uvicorn.server import ServerState
 
 # RFC 9113 section 8.2.2: connection-specific headers MUST NOT appear in
@@ -215,7 +222,11 @@ class ZttpH2Protocol(asyncio.Protocol):
             "query_string": event.query,
             "headers": headers,
             "state": self.app_state.copy(),
-            "extensions": {"http.response.early_hint": {}, "http.response.trailers": {}},
+            "extensions": {
+                "http.response.early_hint": {},
+                "http.response.trailers": {},
+                DIRECT_CLIENT_EXTENSION: {"client": self.client},
+            },
         }
 
         # Refuse new streams once a shutdown began, and handle 503 responses
