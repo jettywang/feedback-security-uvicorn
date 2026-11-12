@@ -199,6 +199,14 @@ def _parse_headers(ctx: click.Context, param: click.Parameter, value: tuple[str,
     show_default=True,
 )
 @click.option(
+    "--lifespan-state-key",
+    "lifespan_state_keys",
+    multiple=True,
+    help="Limit the lifespan state keys copied into each request/websocket scope to the"
+    " given keys. May be used multiple times. If not provided, the full lifespan state"
+    " is copied into each scope.",
+)
+@click.option(
     "--interface",
     type=INTERFACE_CHOICES,
     default="auto",
@@ -419,6 +427,7 @@ def main(
     ws_ping_timeout: float,
     ws_per_message_deflate: bool,
     lifespan: LifespanType,
+    lifespan_state_keys: list[str],
     interface: InterfaceType,
     reload: bool,
     reload_dirs: list[str],
@@ -472,6 +481,7 @@ def main(
         ws_ping_timeout=ws_ping_timeout,
         ws_per_message_deflate=ws_per_message_deflate,
         lifespan=lifespan,
+        lifespan_state_keys=lifespan_state_keys or None,
         env_file=env_file,
         log_config=LOGGING_CONFIG if log_config is None else log_config,
         log_level=log_level,
@@ -528,6 +538,7 @@ def run(
     ws_ping_timeout: float | None = 20.0,
     ws_per_message_deflate: bool = True,
     lifespan: LifespanType = "auto",
+    lifespan_state_keys: list[str] | None = None,
     interface: InterfaceType = "auto",
     reload: bool = False,
     reload_dirs: list[str] | str | None = None,
@@ -585,6 +596,7 @@ def run(
         ws_ping_timeout=ws_ping_timeout,
         ws_per_message_deflate=ws_per_message_deflate,
         lifespan=lifespan,
+        lifespan_state_keys=lifespan_state_keys,
         interface=interface,
         reload=reload,
         reload_dirs=reload_dirs,

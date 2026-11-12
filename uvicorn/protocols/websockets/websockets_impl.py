@@ -31,6 +31,7 @@ from uvicorn.logging import TRACE_LOG_LEVEL
 from uvicorn.protocols.utils import (
     ClientDisconnected,
     get_client_addr,
+    get_lifespan_state,
     get_local_addr,
     get_path_with_query_string,
     get_remote_addr,
@@ -207,7 +208,7 @@ class WebSocketProtocol(WebSocketServerProtocol):
             "query_string": query_string.encode("ascii"),
             "headers": asgi_headers,
             "subprotocols": subprotocols,
-            "state": self.app_state.copy(),
+            "state": get_lifespan_state(self.app_state, self.config.lifespan_state_keys),
             "extensions": {"websocket.http.response": {}},
         }
         task = self.loop.create_task(self.run_asgi())

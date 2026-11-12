@@ -21,7 +21,14 @@ from uvicorn._types import (
 from uvicorn.config import Config
 from uvicorn.logging import TRACE_LOG_LEVEL
 from uvicorn.protocols.http.flow_control import HIGH_WATER_LIMIT, FlowControl, service_unavailable
-from uvicorn.protocols.utils import get_client_addr, get_local_addr, get_path_with_query_string, get_remote_addr, is_ssl
+from uvicorn.protocols.utils import (
+    get_client_addr,
+    get_lifespan_state,
+    get_local_addr,
+    get_path_with_query_string,
+    get_remote_addr,
+    is_ssl,
+)
 from uvicorn.server import ServerState
 
 
@@ -170,7 +177,7 @@ class ZttpProtocol(asyncio.Protocol):
                     "raw_path": full_raw_path,
                     "query_string": event.query,
                     "headers": self.headers,
-                    "state": self.app_state.copy(),
+                    "state": get_lifespan_state(self.app_state, self.config.lifespan_state_keys),
                 }
                 if self._should_upgrade():
                     self.handle_websocket_upgrade(event)

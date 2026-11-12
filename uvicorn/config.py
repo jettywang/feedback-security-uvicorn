@@ -247,6 +247,7 @@ class Config:
         factory: bool = False,
         h11_max_incomplete_event_size: int | None = None,
         reset_contextvars: bool = False,
+        lifespan_state_keys: list[str] | None = None,
     ):
         self.app = app
         self.host = host
@@ -297,6 +298,7 @@ class Config:
         self.factory = factory
         self.h11_max_incomplete_event_size = h11_max_incomplete_event_size
         self.reset_contextvars = reset_contextvars
+        self.lifespan_state_keys = lifespan_state_keys
 
         self.loaded = False
         self.configure_logging()

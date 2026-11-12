@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import socket
+from typing import Any
 
 from uvicorn._types import WWWScope
 
@@ -59,3 +60,9 @@ def get_path_with_query_string(scope: WWWScope) -> str:
     if scope["query_string"]:
         path_with_query_string = "{}?{}".format(path_with_query_string, scope["query_string"].decode("ascii"))
     return path_with_query_string.replace('"', "%22")
+
+
+def get_lifespan_state(app_state: dict[str, Any], lifespan_state_keys: list[str] | None) -> dict[str, Any]:
+    if lifespan_state_keys is None:
+        return app_state.copy()
+    return {key: app_state[key] for key in lifespan_state_keys if key in app_state}
