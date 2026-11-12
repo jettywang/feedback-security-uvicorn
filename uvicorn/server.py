@@ -19,6 +19,7 @@ from typing import TYPE_CHECKING, TypeAlias
 
 from uvicorn._ansi import style
 from uvicorn._compat import asyncio_run
+from uvicorn._tls import validate_listeners_tls
 from uvicorn.config import STARTUP_FAILURE, Config
 
 if TYPE_CHECKING:
@@ -113,10 +114,26 @@ class Server:
             logger.info(message, process_id, extra={"color_message": color_message})
 
     async def startup(self, sockets: list[socket.socket] | None = None) -> None:
+        listeners = await self._bind_listeners(sockets)
+
+        # Enforce the TLS policy before the ASGI application starts, so that a
+        # rejected listener never reaches the lifespan startup phase.
+        validate_listeners_tls(listeners, ssl_enabled=self.config.ssl is not None)
+
         await self.lifespan.startup()
         if self.lifespan.should_exit:
             sys.exit(STARTUP_FAILURE)
 
+        if sockets is None:
+            self._log_started_message(listeners)
+        else:
+            # We're most likely running multiple workers, so a message has already been
+            # logged by `config.bind_socket()`.
+            pass  # pragma: full coverage
+
+        self.started = True
+
+    async def _bind_listeners(self, sockets: list[socket.socket] | None) -> Sequence[socket.SocketType]:
         config = self.config
 
         def create_protocol(
@@ -188,21 +205,13 @@ class Server:
                 )
             except OSError as exc:
                 logger.error(exc)
-                await self.lifespan.shutdown()
                 sys.exit(STARTUP_FAILURE)
 
             assert server.sockets is not None
             listeners = server.sockets
             self.servers = [server]
 
-        if sockets is None:
-            self._log_started_message(listeners)
-        else:
-            # We're most likely running multiple workers, so a message has already been
-            # logged by `config.bind_socket()`.
-            pass  # pragma: full coverage
-
-        self.started = True
+        return listeners
 
     def _log_started_message(self, listeners: Sequence[socket.SocketType]) -> None:
         config = self.config

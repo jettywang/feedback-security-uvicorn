@@ -251,6 +251,15 @@ uvicorn.run(
 
 The factory is called inside each worker process, so it works with `--reload` and `--workers > 1`. The factory itself must be picklable in those modes (a top-level function is fine; lambdas and local closures are not). The `ssl_*` settings on `Config` are only consumed by `default_ssl_context_factory()`; if you build the context yourself without calling it, those settings are ignored.
 
+### Listener TLS policy
+
+At startup, uvicorn inspects every listener's bound address and enforces a TLS policy: plaintext (no SSL configured) listeners may only bind to local addresses, while any non-local (public) listener must use TLS.
+
+- Loopback addresses (`127.0.0.0/8`, `::1`) and UNIX domain sockets are allowed to run without TLS.
+- A listener on any other address without SSL raises `uvicorn._tls.TLSConfigurationError`, naming the rejected `host:port`, before the ASGI application starts.
+
+The check applies both to sockets uvicorn binds itself and to sockets handed in by a parent process (for example, a gunicorn-style deployment), so a misconfigured listener is rejected before the application begins its lifespan startup.
+
 ## Proxies and Forwarded Headers
 
 When running an application behind one or more proxies, certain information about the request is lost.
