@@ -114,6 +114,38 @@ Graceful process shutdowns are particularly important during a restart period. D
 
 Uvicorn handles process shutdown gracefully, ensuring that connections are properly finalized, and all tasks have run to completion. During a shutdown period Uvicorn will ensure that responses and tasks must still complete within the configured timeout periods.
 
+### Shutdown phase events
+
+For rolling restarts you may want to observe which requests finish inside the shutdown budget and which ones are cancelled. A `Server` instance exposes a read-only stream of shutdown phase events through `Server.subscribe_shutdown_events()`:
+
+```python
+async for event in server.subscribe_shutdown_events():
+    print(event.phase, event.pending_tasks, event.completed_tasks, event.cancelled_tasks)
+```
+
+Each `ShutdownEvent` is an immutable value carrying only the `phase` and aggregate task counters:
+
+* `pending_tasks` — request/background tasks still running at the moment the event was emitted.
+* `completed_tasks` — tasks that finished within the graceful shutdown budget.
+* `cancelled_tasks` — tasks that were cancelled because the budget was exhausted.
+
+No request, connection or task object, and therefore no request content, is ever included in an event. Events emitted before a subscription is established are not replayed, and the stream ends once shutdown finishes.
+
+The phases, emitted in this order as applicable, are:
+
+* `shutdown.started` — the shutdown sequence begins; listeners stop accepting new connections.
+* `shutdown.waiting_for_connections` — waiting for existing connections to finish sending responses.
+* `shutdown.waiting_for_tasks` — waiting for background tasks to run to completion.
+* `shutdown.graceful_period_completed` — every task finished within `timeout_graceful_shutdown`.
+* `shutdown.graceful_period_exceeded` — the budget was exhausted before all tasks finished.
+* `shutdown.tasks_cancelled` — the still-running tasks have been cancelled.
+* `shutdown.lifespan_shutdown_started` — the application lifespan shutdown event is being sent.
+* `shutdown.lifespan_shutdown_completed` — the application finished its lifespan shutdown successfully.
+* `shutdown.lifespan_shutdown_failed` — the application reported a lifespan shutdown failure.
+* `shutdown.completed` — the shutdown sequence finished.
+
+`shutdown.tasks_cancelled` (request tasks cancelled after the budget) and `shutdown.lifespan_shutdown_failed` (the application itself failed to shut down) are distinct phases, so operations tooling can tell task cancellation apart from an application shutdown failure. When a second `SIGINT` forces the exit, the waiting and lifespan shutdown phases are skipped and only `shutdown.started`, `shutdown.graceful_period_completed` and `shutdown.completed` are emitted.
+
 ---
 
 ## HTTP Pipelining

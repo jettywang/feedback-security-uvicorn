@@ -12,7 +12,7 @@ import socket
 import sys
 import threading
 import time
-from collections.abc import Generator, Sequence
+from collections.abc import AsyncIterator, Generator, Sequence
 from email.utils import formatdate
 from types import FrameType
 from typing import TYPE_CHECKING, TypeAlias
@@ -20,6 +20,7 @@ from typing import TYPE_CHECKING, TypeAlias
 from uvicorn._ansi import style
 from uvicorn._compat import asyncio_run
 from uvicorn.config import STARTUP_FAILURE, Config
+from uvicorn.shutdown import ShutdownEvent, ShutdownPhase
 
 if TYPE_CHECKING:
     from uvicorn.protocols.http.auto_zttp_impl import AutoZttpProtocol
@@ -75,6 +76,47 @@ class Server:
         self.last_notified = 0.0
 
         self._captured_signals: list[int] = []
+        self._shutdown_subscribers: set[asyncio.Queue[ShutdownEvent | None]] = set()
+        self._shutdown_completed_tasks = 0
+        self._shutdown_cancelled_tasks = 0
+
+    async def subscribe_shutdown_events(self) -> AsyncIterator[ShutdownEvent]:
+        """Subscribe to read-only graceful shutdown phase events.
+
+        Events are delivered to every active subscriber as the shutdown
+        progresses. Subscribing is only useful while the server is running;
+        events emitted before the subscription is established are not replayed.
+        The stream ends once the shutdown sequence is finished.
+
+        Usage::
+
+            async for event in server.subscribe_shutdown_events():
+                ...
+        """
+        queue: asyncio.Queue[ShutdownEvent | None] = asyncio.Queue()
+        self._shutdown_subscribers.add(queue)
+        try:
+            while True:
+                event = await queue.get()
+                if event is None:
+                    return
+                yield event
+        finally:
+            self._shutdown_subscribers.discard(queue)
+
+    def _emit_shutdown_event(self, phase: ShutdownPhase) -> None:
+        event = ShutdownEvent(
+            phase=phase,
+            pending_tasks=len(self.server_state.tasks),
+            completed_tasks=self._shutdown_completed_tasks,
+            cancelled_tasks=self._shutdown_cancelled_tasks,
+        )
+        for queue in self._shutdown_subscribers:
+            queue.put_nowait(event)
+
+    def _finish_shutdown_event_stream(self) -> None:
+        for queue in self._shutdown_subscribers:
+            queue.put_nowait(None)
 
     @functools.cached_property
     def limit_max_requests(self) -> int | None:
@@ -280,6 +322,7 @@ class Server:
 
     async def shutdown(self, sockets: list[socket.socket] | None = None) -> None:
         logger.info("Shutting down")
+        self._emit_shutdown_event(ShutdownPhase.SHUTDOWN_STARTED)
 
         # Stop accepting new connections.
         for server in self.servers:
@@ -292,26 +335,44 @@ class Server:
             connection.shutdown()
         await asyncio.sleep(0.1)
 
+        initial_tasks = len(self.server_state.tasks)
         try:
             async with asyncio.timeout(self.config.timeout_graceful_shutdown):
                 await self._wait_tasks_to_complete()
         except TimeoutError:
+            cancelled = len(self.server_state.tasks)
+            self._shutdown_completed_tasks = initial_tasks - cancelled
+            self._shutdown_cancelled_tasks = cancelled
             logger.error(
                 "Cancel %s running task(s), timeout graceful shutdown exceeded",
-                len(self.server_state.tasks),
+                cancelled,
             )
+            self._emit_shutdown_event(ShutdownPhase.GRACEFUL_PERIOD_EXCEEDED)
             for t in self.server_state.tasks:
                 t.cancel(msg="Task cancelled, timeout graceful shutdown exceeded")
+            self._emit_shutdown_event(ShutdownPhase.TASKS_CANCELLED)
+        else:
+            self._shutdown_completed_tasks = initial_tasks
+            self._emit_shutdown_event(ShutdownPhase.GRACEFUL_PERIOD_COMPLETED)
 
         # Send the lifespan shutdown event, and wait for application shutdown.
         if not self.force_exit:
+            self._emit_shutdown_event(ShutdownPhase.LIFESPAN_SHUTDOWN_STARTED)
             await self.lifespan.shutdown()
+            if self.lifespan.should_exit:
+                self._emit_shutdown_event(ShutdownPhase.LIFESPAN_SHUTDOWN_FAILED)
+            else:
+                self._emit_shutdown_event(ShutdownPhase.LIFESPAN_SHUTDOWN_COMPLETED)
+
+        self._emit_shutdown_event(ShutdownPhase.SHUTDOWN_COMPLETED)
+        self._finish_shutdown_event_stream()
 
     async def _wait_tasks_to_complete(self) -> None:
         # Wait for existing connections to finish sending responses.
         if self.server_state.connections and not self.force_exit:
             msg = "Waiting for connections to close. (CTRL+C to force quit)"
             logger.info(msg)
+            self._emit_shutdown_event(ShutdownPhase.WAITING_FOR_CONNECTIONS)
             while self.server_state.connections and not self.force_exit:
                 await asyncio.sleep(0.1)
 
@@ -319,6 +380,7 @@ class Server:
         if self.server_state.tasks and not self.force_exit:
             msg = "Waiting for background tasks to complete. (CTRL+C to force quit)"
             logger.info(msg)
+            self._emit_shutdown_event(ShutdownPhase.WAITING_FOR_TASKS)
             while self.server_state.tasks and not self.force_exit:
                 await asyncio.sleep(0.1)
 

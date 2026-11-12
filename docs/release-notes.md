@@ -8,6 +8,7 @@ HTTP/2 support remains experimental. Install `zttp>=0.0.34` and enable it with `
 
 ### Added
 
+* Add subscribable, read-only graceful shutdown phase events through `Server.subscribe_shutdown_events()`. Events carry only a `ShutdownPhase` and aggregate task counters (`pending_tasks`, `completed_tasks`, `cancelled_tasks`), never request content, and distinguish tasks cancelled when the shutdown budget is exhausted from an application lifespan shutdown failure.
 * Add HTTP/2 response trailers through the ASGI `http.response.trailers` extension. Clients must send `TE: trailers` to receive them ([#3146](https://github.com/Kludex/uvicorn/pull/3146))
 * Add HTTP/2 `103 Early Hints` through the ASGI `http.response.early_hint` extension ([#3137](https://github.com/Kludex/uvicorn/pull/3137))
 
