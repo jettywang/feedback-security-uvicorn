@@ -33,6 +33,19 @@ def message_with_placeholders(message: Any) -> Any:
     return new_message
 
 
+def summarize_message(message: Any) -> dict[str, Any]:
+    """
+    Return the structured, payload-free view of an ASGI message.
+
+    The summary is derived from ``message_with_placeholders`` so that the
+    structured collector output and the human-readable trace output share
+    the same retention rules: only the event type is kept, never the
+    business payload.
+    """
+    redacted = message_with_placeholders(message)
+    return {"asgi_event": redacted.get("type")}
+
+
 class MessageLoggerMiddleware:
     def __init__(self, app: "ASGI3Application"):
         self.task_counter = 0
@@ -55,13 +68,23 @@ class MessageLoggerMiddleware:
         task_counter = self.task_counter
         client = scope.get("client")
         prefix = "%s:%d - ASGI" % (client[0], client[1]) if client else "ASGI"
+        connection = "%s [%d]" % (prefix, task_counter)
+
+        def log_extra(direction: str | None = None, message: Any = None) -> dict[str, Any]:
+            fields: dict[str, Any] = {
+                "asgi_connection": connection,
+                "asgi_direction": direction,
+            }
+            if message is not None:
+                fields.update(summarize_message(message))
+            return fields
 
         async def inner_receive() -> "ASGIReceiveEvent":
             message = await receive()
             logged_message = message_with_placeholders(message)
             log_text = "%s [%d] Receive %s"
             self.logger.trace(  # type: ignore
-                log_text, prefix, task_counter, logged_message
+                log_text, prefix, task_counter, logged_message, extra=log_extra("receive", message)
             )
             return message
 
@@ -69,19 +92,19 @@ class MessageLoggerMiddleware:
             logged_message = message_with_placeholders(message)
             log_text = "%s [%d] Send %s"
             self.logger.trace(  # type: ignore
-                log_text, prefix, task_counter, logged_message
+                log_text, prefix, task_counter, logged_message, extra=log_extra("send", message)
             )
             await send(message)
 
         logged_scope = message_with_placeholders(scope)
         log_text = "%s [%d] Started scope=%s"
-        self.logger.trace(log_text, prefix, task_counter, logged_scope)  # type: ignore
+        self.logger.trace(log_text, prefix, task_counter, logged_scope, extra=log_extra(message=scope))  # type: ignore
         try:
             await self.app(scope, inner_receive, inner_send)
         except BaseException as exc:
             log_text = "%s [%d] Raised exception"
-            self.logger.trace(log_text, prefix, task_counter)  # type: ignore
+            self.logger.trace(log_text, prefix, task_counter, extra=log_extra())  # type: ignore
             raise exc from None
         else:
             log_text = "%s [%d] Completed"
-            self.logger.trace(log_text, prefix, task_counter)  # type: ignore
+            self.logger.trace(log_text, prefix, task_counter, extra=log_extra())  # type: ignore
